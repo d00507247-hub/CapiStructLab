@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AGE Capital Structure</title>
+  <meta name="description" content="Capital structure calculator for the AGE case: Campus Deli and Sub Shop, plus Firm U and Firm L.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <p class="eyebrow">FIN 4150 &middot; AGE case</p>
+    <h1>Capital Structure Lab</h1>
+    <p class="lede">What borrowing does to return, risk, share price and the cost of capital, for Firm U and Firm L and for Campus Deli and Sub Shop (CDSS).</p>
+  </header>
+
+  <main>
+    <p id="status">Loading the data files&hellip;</p>
+
+    <section aria-labelledby="h-firms">
+      <h2 id="h-firms">Firm U and Firm L (question c)</h2>
+      <p>Two firms with the same assets and the same EBIT in each kind of year. Firm L borrows; Firm U doesn't.</p>
+      <div id="firms"></div>
+    </section>
+
+    <section aria-labelledby="h-cdss">
+      <h2 id="h-cdss">CDSS: the starting point</h2>
+      <div id="cdss-inputs"></div>
+    </section>
+
+    <section aria-labelledby="h-case">
+      <h2 id="h-case">Case method (questions d(3) and d(4)): buy back at today&rsquo;s price</h2>
+      <div id="case-method"></div>
+    </section>
+
+    <section aria-labelledby="h-new">
+      <h2 id="h-new">New-price method: buy back at the price after the announcement</h2>
+      <div id="new-price-method"></div>
+    </section>
+
+    <section aria-labelledby="h-summary">
+      <h2 id="h-summary">Which amount of debt?</h2>
+      <div id="summary"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Every number comes from the files in <code>data/</code>. The app runs entirely in your browser and sends nothing anywhere.</p>
+  </footer>
+
+  <script src="capstruct.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
