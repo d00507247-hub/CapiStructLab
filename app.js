@@ -86,9 +86,49 @@
     return el('table', { class: 'firm' }, [el('caption', {}, caption), head, body]);
   }
 
+  // Short labels under a slider, like $250k or $1M.
+  function fmtCompact(x) {
+    if (x >= 1e6) return '$' + C.roundHalfUp(x / 1e6, 3) + 'M';
+    if (x >= 1e3) return '$' + C.roundHalfUp(x / 1e3, 3) + 'k';
+    return C.fmtDollars(x);
+  }
+
+  // A labelled slider over a list of stops. The slider moves over the
+  // positions 0, 1, 2, ... so it can only land on a listed amount.
+  function makeSlider(id, labelText, stops) {
+    const input = el('input', { type: 'range', id: id, min: '0', max: String(stops.length - 1), step: '1' });
+    const output = el('output', { for: id, class: 'lever-value' });
+    const ticks = el('div', { class: 'ticks', 'aria-hidden': 'true' }, stops.map(s => el('span', {}, fmtCompact(s))));
+    const head = el('div', { class: 'lever-head' }, [el('label', { for: id }, labelText), output]);
+    return {
+      input: input,
+      parts: [head, input, ticks],
+      set(i) {
+        input.value = String(i);
+        output.textContent = C.fmtDollars(stops[i]);
+        input.setAttribute('aria-valuetext', C.fmtDollars(stops[i]));
+      }
+    };
+  }
+
   function renderFirms(firmIn, scenarios, taxRate) {
-    const u = C.firmExample({ totalAssets: firmIn.totalAssets, debt: 0, interestRate: firmIn.interestRate, taxRate }, scenarios);
-    const l = C.firmExample({ totalAssets: firmIn.totalAssets, debt: firmIn.firmLDebt, interestRate: firmIn.interestRate, taxRate }, scenarios);
+    const make = debt => C.firmExample({ totalAssets: firmIn.totalAssets, debt: debt, interestRate: firmIn.interestRate, taxRate: taxRate }, scenarios);
+    const u = make(0);
+    const stops = C.firmSliderStops(firmIn);
+    const caseIndex = stops.indexOf(firmIn.firmLDebt);
+    const slider = makeSlider('firm-l-debt', 'Firm L’s debt', stops);
+    const caseBtn = el('button', { type: 'button' }, 'Case (' + C.fmtDollars(firmIn.firmLDebt) + ')');
+    const lCell = el('div');
+
+    function draw(i) {
+      slider.set(i);
+      const l = make(stops[i]);
+      lCell.replaceChildren(firmTable('Firm L: ' + C.fmtDollars(l.debt) + ' of debt at ' + C.fmtPct(l.interestRate), l, taxRate));
+    }
+    slider.input.addEventListener('input', () => draw(Number(slider.input.value)));
+    caseBtn.addEventListener('click', () => draw(caseIndex));
+    draw(caseIndex);
+
     const notes = [
       el('p', { class: 'note' }, 'Firm U has no interest, so its TIE, E(TIE) and σ(TIE) are n/a. ROE uses book equity: total assets − debt.')
     ];
@@ -96,12 +136,109 @@
       notes.push(el('p', { class: 'warning' }, 'The probabilities in data/ebit_scenarios.csv add up to ' + C.fmtNumber(u.probabilitySum, 4) + ', not 1.'));
     }
     fill('firms', [
-      el('div', { class: 'firm-grid' }, [
-        firmTable('Firm U: no debt', u, taxRate),
-        firmTable('Firm L: ' + C.fmtDollars(l.debt) + ' of debt at ' + C.fmtPct(l.interestRate), l, taxRate)
+      el('div', { class: 'lever' }, [
+        ...slider.parts,
+        el('div', { class: 'buttons' }, caseBtn),
+        el('p', { class: 'note' }, 'The interest rate is held at ' + C.fmtPct(firmIn.interestRate) +
+          ' at every amount, so the slider shows what debt does to Firm L’s return and risk, not how lenders would respond.')
       ]),
+      el('div', { class: 'firm-grid' }, [firmTable('Firm U: no debt', u, taxRate), lCell]),
       ...notes
     ]);
+  }
+
+  // ---------- CDSS debt slider and buttons ----------
+
+  function stakeValue(m) {
+    if (m.status === 'ok') return C.fmtPct(m.value);
+    if (m.status === 'all') return '100.00%';
+    if (m.status === 'sell') return 'n/a: see note';
+    return 'n/a';
+  }
+
+  function stakeNote(m) {
+    if (m.status === 'all') return el('p', { class: 'note' }, 'No outside shareholders would be left: the buyback takes every share they own.');
+    if (m.status === 'sell') {
+      return el('p', { class: 'warning' }, 'Management would have to sell: the buyback (' + C.fmtShares(m.repurchased) +
+        ' shares) is more than the ' + C.fmtShares(m.outside) + ' shares outside investors own.');
+    }
+    return null;
+  }
+
+  function methodCard(title, r, waccLabel, wacc) {
+    const items = [
+      ['Share price', C.fmtMoney(r.price), 'price'],
+      ['Shares repurchased', C.fmtShares(r.repurchased)],
+      ['Shares remaining', C.fmtShares(r.remaining)],
+      ['EPS', C.fmtMoney(r.eps)],
+      ['Dividends per share', C.fmtMoney(r.dps)],
+      ['TIE', C.fmtMult(r.tie)],
+      [waccLabel, C.fmtPct(wacc)],
+      ['Management’s share', stakeValue(r.management)]
+    ];
+    return el('div', { class: 'method-card' }, [
+      el('h3', {}, title),
+      el('dl', {}, items.map(([k, v, cls]) => el('div', { class: cls || null }, [el('dt', {}, k), el('dd', {}, v)]))),
+      stakeNote(r.management)
+    ]);
+  }
+
+  function buttonMessage(t, what) {
+    if (!t) return 'No amount of debt has a ' + what + '.';
+    if (t.agree) return 'Both buyback methods give the ' + what + ' at ' + C.fmtDollars(t.debt) + ' of debt.';
+    return 'The methods disagree: the case method gives the ' + what + ' at ' + C.fmtDollars(t.caseDebt) +
+      ' and the new-price method at ' + (t.newDebt === null ? 'no amount' : C.fmtDollars(t.newDebt)) +
+      '. The slider is at the case method’s amount.';
+  }
+
+  function renderLevers(inp, res) {
+    const stops = res.caseRows.map(r => r.debt);
+    const slider = makeSlider('cdss-debt', 'CDSS’s debt', stops);
+    const priceBtn = el('button', { type: 'button' }, 'Best price');
+    const epsBtn = el('button', { type: 'button' }, 'Highest EPS');
+    const message = el('p', { class: 'callout', role: 'status' });
+    message.hidden = true;
+    const rates = el('p', { class: 'note' });
+    const cards = el('div', { class: 'method-grid' });
+
+    function draw(i, msg) {
+      slider.set(i);
+      const c = res.caseRows[i];
+      const n = res.newRows[i];
+      rates.textContent = 'At ' + C.fmtDollars(c.debt) + ' the banker quotes r_d = ' + (c.rd === null ? '—' : C.fmtPct(c.rd)) +
+        ' and r_s = ' + C.fmtPct(c.rs) + '. Interest = ' + C.fmtDollars(c.interest) + '; net income = ' + C.fmtDollars(c.netIncome) + '.';
+      cards.replaceChildren(
+        methodCard('Case method: buy back at ' + C.fmtMoney(inp.price), c, 'WACC (book weights)', c.waccBook),
+        methodCard('New-price method: buy back at ' + C.fmtMoney(n.price), n, 'WACC (market weights)', n.waccMarket)
+      );
+      message.textContent = msg || '';
+      message.hidden = !msg;
+      document.querySelectorAll('table.schedule tr[data-debt]').forEach(tr => {
+        tr.classList.toggle('selected', tr.getAttribute('data-debt') === String(c.debt));
+      });
+    }
+
+    function goTo(target, what) {
+      const i = target ? stops.indexOf(target.debt) : Number(slider.input.value);
+      draw(i, buttonMessage(target, what));
+    }
+
+    slider.input.addEventListener('input', () => draw(Number(slider.input.value)));
+    priceBtn.addEventListener('click', () => goTo(res.buttons.price, 'highest share price'));
+    epsBtn.addEventListener('click', () => goTo(res.buttons.eps, 'highest EPS'));
+
+    fill('cdss-levers', [
+      el('div', { class: 'lever' }, [
+        ...slider.parts,
+        el('div', { class: 'buttons' }, [priceBtn, epsBtn]),
+        message
+      ]),
+      rates,
+      cards,
+      el('p', { class: 'note' }, 'The slider stops only at the amounts in the banker’s schedule. The selected amount is outlined in the tables below.')
+    ]);
+    const zero = stops.indexOf(0);
+    draw(zero === -1 ? 0 : zero);
   }
 
   // ---------- CDSS ----------
@@ -110,7 +247,7 @@
   // turn each row into a card on a phone.
   function scheduleTable(caption, columns, rows, bestDebt) {
     const head = el('thead', {}, el('tr', {}, columns.map(c => el('th', { scope: 'col' }, c.label))));
-    const body = el('tbody', {}, rows.map(r => el('tr', { class: r.debt === bestDebt ? 'best' : null }, columns.map((c, i) =>
+    const body = el('tbody', {}, rows.map(r => el('tr', { class: r.debt === bestDebt ? 'best' : null, 'data-debt': String(r.debt) }, columns.map((c, i) =>
       i === 0
         ? el('th', { scope: 'row', 'data-label': c.label }, [c.value(r), r.debt === bestDebt ? el('span', { class: 'tag' }, 'highest price') : null])
         : el('td', { 'data-label': c.label }, c.value(r))
@@ -182,6 +319,7 @@
     ]);
 
     renderSummary(inp, res);
+    renderLevers(inp, res);
   }
 
   function renderSummary(inp, res) {

@@ -261,7 +261,8 @@
       tie: ni.interest > 0 ? ebit / ni.interest : null,
       price: price,
       // Book weights (the AGE solution's method for d(7))
-      waccBook: (D / A) * rdAfterTax + ((A - D) / A) * row.rs
+      waccBook: (D / A) * rdAfterTax + ((A - D) / A) * row.rs,
+      management: managementStake(inp, repurchased, remaining)
     };
   }
 
@@ -295,10 +296,22 @@
       dps: eps,
       tie: ni.interest > 0 ? ebit / ni.interest : null,
       waccMarket: waccMarket,
+      management: managementStake(inp, repurchased, remaining),
       // Checks: EPS = r_s × P, and WACC = EBIT(1 − T) / V
       epsCheckOk: eps !== null && close(eps, row.rs * price),
       waccCheckOk: waccMarket !== null && close(waccMarket, waccCheckValue)
     };
+  }
+
+  // Management's share of the company after the buyback. Management doesn't
+  // sell, so only outside investors' shares can be bought back.
+  function managementStake(inp, repurchased, remaining) {
+    if (repurchased === null || remaining === null) return { status: 'na' };
+    const outside = (1 - inp.managementShare) * inp.shares;
+    const tol = 1e-9 * Math.max(1, outside);
+    if (repurchased > outside + tol) return { status: 'sell', outside: outside, repurchased: repurchased };
+    if (Math.abs(repurchased - outside) <= tol) return { status: 'all', value: 1 };
+    return { status: 'ok', value: inp.managementShare * inp.shares / remaining };
   }
 
   function close(a, b) {
@@ -320,6 +333,31 @@
     return best === null ? null : { debt: best.debt, value: best[key] };
   }
 
+  // If both buyback methods pick the same amount, go there. If not, go to the
+  // case method's amount and report both (agree = false).
+  function buttonTarget(caseBest, newBest) {
+    if (!caseBest && !newBest) return null;
+    if (!caseBest) return { debt: newBest.debt, caseDebt: null, newDebt: newBest.debt, agree: false };
+    return {
+      debt: caseBest.debt,
+      caseDebt: caseBest.debt,
+      newDebt: newBest ? newBest.debt : null,
+      agree: !!newBest && newBest.debt === caseBest.debt
+    };
+  }
+
+  // The Firm L slider's stops: 0 to slider_max in steps of slider_step,
+  // always including the case's own amount of debt.
+  function firmSliderStops(firmIn) {
+    const stops = [];
+    if (firmIn.sliderStep > 0) {
+      const count = Math.floor(firmIn.sliderMax / firmIn.sliderStep + 1e-9);
+      for (let i = 0; i <= count; i++) stops.push(roundHalfUp(i * firmIn.sliderStep, 6));
+    }
+    if (stops.indexOf(firmIn.firmLDebt) === -1) stops.push(firmIn.firmLDebt);
+    return stops.sort((a, b) => a - b);
+  }
+
   function analyzeCdss(inp, schedule) {
     const ebit = cdssEbit(inp);
     const caseRows = schedule.map(r => caseMethod(inp, ebit, r));
@@ -333,6 +371,13 @@
     };
     const picks = [best.casePrice, best.newPrice, best.bookWacc, best.marketWacc];
     const allAgree = picks.every(p => p !== null && p.debt === picks[0].debt);
+    best.caseEps = argBest(caseRows, 'eps', 'max');
+    best.newEps = argBest(newRows, 'eps', 'max');
+    // Where the Best price and Highest EPS buttons move the slider.
+    const buttons = {
+      price: buttonTarget(best.casePrice, best.newPrice),
+      eps: buttonTarget(best.caseEps, best.newEps)
+    };
 
     const warnings = [];
     // Check: EPS / r_s at $0 should equal today's price in cdss.csv.
@@ -364,6 +409,7 @@
       caseRows: caseRows,
       newRows: newRows,
       best: best,
+      buttons: buttons,
       allAgree: allAgree,
       zeroCheck: zeroCheck,
       epsChecksOk: epsChecksOk,
@@ -414,7 +460,7 @@
   const api = {
     parseCSV, toNumber, keyValues, taxRateFrom, cdssInputs, parseSchedule, firmInputs, parseScenarios,
     expectedValue, stdDev, firmExample,
-    cdssEbit, caseMethod, newPriceMethod, argBest, analyzeCdss,
+    cdssEbit, caseMethod, newPriceMethod, managementStake, argBest, buttonTarget, firmSliderStops, analyzeCdss,
     roundHalfUp, fmtNumber, fmtDollars, fmtMoney, fmtPct, fmtMult, fmtShares, fmtParen
   };
 
