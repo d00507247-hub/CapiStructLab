@@ -384,4 +384,11 @@
   }
 
   main();
+
+  // Register the service worker (sw.js) so the app installs and works offline.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => { /* the app still works online without it */ });
+    });
+  }
 })();
